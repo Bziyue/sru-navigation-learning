@@ -38,12 +38,9 @@ class OnPolicyRunner:
         # Video recording (initialized lazily, enabled via set_video_recording)
         self.video_recorder: VideoRecorder | None = None
 
-        obs, extras = self.env.get_observations()
+        obs, critic_obs = self._split_observations(self.env.get_observations())
         num_obs = obs.shape[1]
-        if "critic" in extras["observations"]:
-            num_critic_obs = extras["observations"]["critic"].shape[1]
-        else:
-            num_critic_obs = num_obs
+        num_critic_obs = critic_obs.shape[1]
         actor_critic_class = eval(self.policy_cfg.pop("class_name"))
         print("num obs", num_obs)
         print("num critic obs", num_critic_obs)
@@ -127,8 +124,7 @@ class OnPolicyRunner:
             self.env.episode_length_buf = torch.randint_like(
                 self.env.episode_length_buf, high=int(self.env.max_episode_length)
             )
-        obs, extras = self.env.get_observations()
-        critic_obs = extras["observations"].get("critic", obs)
+        obs, critic_obs = self._split_observations(self.env.get_observations())
         obs, critic_obs = obs.to(self.device), critic_obs.to(self.device)
         self.train_mode()
 
@@ -159,7 +155,8 @@ class OnPolicyRunner:
             with torch.no_grad():
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, critic_obs)
-                    obs, rewards, dones, infos = self.env.step(actions)
+                    obs_data, rewards, dones, infos = self.env.step(actions)
+                    obs, critic_obs = self._split_observations(obs_data, infos)
 
                     # Capture video frame if recording
                     # Continue capturing until video_length is reached
@@ -171,10 +168,7 @@ class OnPolicyRunner:
                         rewards = rewards + reward_shifting_value
 
                     obs = self.obs_normalizer(obs)
-                    if "critic" in infos["observations"]:
-                        critic_obs = self.critic_obs_normalizer(infos["observations"]["critic"])
-                    else:
-                        critic_obs = obs
+                    critic_obs = self.critic_obs_normalizer(critic_obs)
                     obs, critic_obs, rewards, dones = (
                         obs.to(self.device),
                         critic_obs.to(self.device),
@@ -244,6 +238,30 @@ class OnPolicyRunner:
                         self.writer.save_file(path)
 
         self.save(os.path.join(self.log_dir, f"model_{self.current_learning_iteration}.pt"))
+
+    def _split_observations(self, observations, extras=None):
+        """Handle both legacy `(obs, extras)` observations and IsaacLab TensorDict observations."""
+        if isinstance(observations, tuple) and len(observations) == 2 and extras is None:
+            observations, extras = observations
+
+        if hasattr(observations, "keys"):
+            keys = set(observations.keys())
+            if "policy" in keys:
+                actor_obs = observations["policy"]
+                critic_obs = observations.get("critic", actor_obs)
+                return actor_obs, critic_obs
+            if "observations" in keys:
+                obs_group = observations["observations"]
+                actor_obs = obs_group.get("policy", obs_group)
+                critic_obs = obs_group.get("critic", actor_obs)
+                return actor_obs, critic_obs
+
+        actor_obs = observations
+        if extras and "observations" in extras and "critic" in extras["observations"]:
+            critic_obs = extras["observations"]["critic"]
+        else:
+            critic_obs = actor_obs
+        return actor_obs, critic_obs
 
     def log(self, locs: dict, width: int = 80, pad: int = 35):
         """Log training statistics."""
