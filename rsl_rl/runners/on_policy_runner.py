@@ -110,11 +110,6 @@ class OnPolicyRunner:
 
                 self.writer = NeptuneSummaryWriter(log_dir=self.log_dir, flush_secs=10, cfg=self.cfg)
                 self.writer.log_config(self.env.cfg, self.cfg, self.alg_cfg, self.policy_cfg)
-            elif self.logger_type == "wandb":
-                from rsl_rl.utils.wandb_utils import WandbSummaryWriter
-
-                self.writer = WandbSummaryWriter(log_dir=self.log_dir, flush_secs=10, cfg=self.cfg)
-                self.writer.log_config(self.env.cfg, self.cfg, self.alg_cfg, self.policy_cfg)
             elif self.logger_type == "tensorboard":
                 self.writer = TensorboardSummaryWriter(log_dir=self.log_dir, flush_secs=10)
             else:
@@ -233,7 +228,7 @@ class OnPolicyRunner:
             ep_infos.clear()
             if it == start_iter:
                 git_file_paths = store_code_state(self.log_dir, self.git_status_repos)
-                if self.logger_type in ["wandb", "neptune"] and git_file_paths:
+                if self.logger_type == "neptune" and git_file_paths:
                     for path in git_file_paths:
                         self.writer.save_file(path)
 
@@ -309,7 +304,7 @@ class OnPolicyRunner:
         if len(locs["rewbuffer"]) > 0:
             self.writer.add_scalar("Train/mean_reward", statistics.mean(locs["rewbuffer"]), locs["it"])
             self.writer.add_scalar("Train/mean_episode_length", statistics.mean(locs["lenbuffer"]), locs["it"])
-            if self.logger_type != "wandb":
+            if self.logger_type != "neptune":
                 self.writer.add_scalar("Train/mean_reward/time", statistics.mean(locs["rewbuffer"]), self.tot_time)
                 self.writer.add_scalar(
                     "Train/mean_episode_length/time", statistics.mean(locs["lenbuffer"]), self.tot_time
@@ -373,7 +368,7 @@ class OnPolicyRunner:
             saved_dict["critic_obs_norm_state_dict"] = self.critic_obs_normalizer.state_dict()
         torch.save(saved_dict, path)
 
-        if self.logger_type in ["neptune", "wandb"]:
+        if self.logger_type == "neptune":
             self.writer.save_model(path, self.current_learning_iteration)
 
     def load(self, path, load_optimizer=True):
@@ -452,12 +447,11 @@ class OnPolicyRunner:
     ):
         """Configure video recording during training.
 
-        Video recording can upload to WandB and/or save locally as MP4 files.
+        Video recording saves MP4 files locally.
 
         Requirements:
         1. Environment with render_mode="rgb_array"
-        2. For WandB upload: logger="wandb" in agent config
-        3. For local save: imageio package installed
+        2. For local save: imageio package installed
 
         Args:
             enable: Whether to enable video recording.

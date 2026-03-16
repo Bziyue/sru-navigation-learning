@@ -2,7 +2,7 @@
 #  Modified by Fan Yang, ETH Zurich 2025
 #  SPDX-License-Identifier: BSD-3-Clause
 
-"""Video recorder utility for logging training videos to WandB and saving locally."""
+"""Video recorder utility for saving training videos locally."""
 
 from __future__ import annotations
 
@@ -17,16 +17,14 @@ if TYPE_CHECKING:
 
 
 class VideoRecorder:
-    """Records video frames during training and logs them to WandB.
+    """Records video frames during training and saves them locally.
 
     This class handles video recording during RL training, capturing frames
-    at specified intervals and uploading them to Weights & Biases for visualization.
+    at specified intervals and saving them to disk for later inspection.
 
     Video recording only works when:
     1. Recording is explicitly enabled via `enable()`
     2. The environment has `render_mode="rgb_array"`
-    3. WandB logger is being used (logger_type == "wandb")
-    4. The writer has `log_video` method available
 
     Example:
         >>> recorder = VideoRecorder(env, video_length=200, video_interval=1000)
@@ -56,7 +54,7 @@ class VideoRecorder:
             video_interval: Number of training iterations between recordings. Defaults to 2000.
             fps: Frames per second for the recorded video. Defaults to 30.
             save_local: Whether to save videos locally as MP4 files. Defaults to True.
-            log_dir: Directory to save videos. If None, videos are only uploaded to WandB.
+            log_dir: Directory to save videos.
         """
         self.env = env
         self.video_length = video_length
@@ -196,12 +194,12 @@ class VideoRecorder:
             return False
 
     def log_video(self, writer, iteration: int, logger_type: str) -> bool:
-        """Log the recorded video to WandB and/or save locally.
+        """Finalize the recorded video and save it locally.
 
         Args:
-            writer: The summary writer (WandB, TensorBoard, etc.).
+            writer: Unused summary writer placeholder for call-site compatibility.
             iteration: Current training iteration for logging step.
-            logger_type: Type of logger being used ("wandb", "tensorboard", "neptune").
+            logger_type: Logger type string (unused).
 
         Returns:
             True if video was successfully logged or saved, False otherwise.
@@ -221,12 +219,6 @@ class VideoRecorder:
         if self.save_local:
             local_success = self._save_video_local(iteration)
             success = success or local_success
-
-        # Upload to WandB if available
-        if logger_type == "wandb" and hasattr(writer, "log_video"):
-            writer.log_video(self._frames, step=iteration, fps=self.fps, tag="Media/video")
-            print(f"[INFO] Uploaded video to WandB with {len(self._frames)} frames at iteration {iteration}")
-            success = True
 
         # Reset state after logging
         self._reset_state()
