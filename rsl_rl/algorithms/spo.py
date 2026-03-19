@@ -106,6 +106,7 @@ class SPO:
     def update(self, iter, max_iters):
         mean_value_loss = 0
         mean_surrogate_loss = 0
+        num_updates = 0
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
@@ -172,10 +173,11 @@ class SPO:
 
             mean_value_loss += value_loss.item()
             mean_surrogate_loss += surrogate_loss.item()
+            num_updates += 1
 
-        num_updates = self.num_learning_epochs * self.num_mini_batches
-        mean_value_loss /= num_updates
-        mean_surrogate_loss /= num_updates
+        if num_updates > 0:
+            mean_value_loss /= num_updates
+            mean_surrogate_loss /= num_updates
         self.storage.clear()
 
         return mean_value_loss, mean_surrogate_loss

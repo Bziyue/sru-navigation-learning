@@ -135,8 +135,9 @@ class RolloutStorage:
 
     def mini_batch_generator(self, num_mini_batches, num_epochs=8):
         batch_size = self.num_envs * self.num_transitions_per_env
-        mini_batch_size = batch_size // num_mini_batches
-        indices = torch.randperm(num_mini_batches * mini_batch_size, requires_grad=False, device=self.device)
+        effective_num_mini_batches = max(1, min(int(num_mini_batches), int(batch_size)))
+        mini_batch_size = (batch_size + effective_num_mini_batches - 1) // effective_num_mini_batches
+        indices = torch.randperm(batch_size, requires_grad=False, device=self.device)
 
         observations = self.observations.flatten(0, 1)
         if self.privileged_observations is not None:
@@ -153,10 +154,12 @@ class RolloutStorage:
         old_sigma = self.sigma.flatten(0, 1)
 
         for epoch in range(num_epochs):
-            for i in range(num_mini_batches):
+            for i in range(effective_num_mini_batches):
                 start = i * mini_batch_size
-                end = (i + 1) * mini_batch_size
+                end = min((i + 1) * mini_batch_size, batch_size)
                 batch_idx = indices[start:end]
+                if batch_idx.numel() == 0:
+                    continue
 
                 obs_batch = observations[batch_idx]
                 critic_observations_batch = critic_observations[batch_idx]
@@ -180,12 +183,15 @@ class RolloutStorage:
         else:
             padded_critic_obs_trajectories = padded_obs_trajectories
 
-        mini_batch_size = self.num_envs // num_mini_batches
+        effective_num_mini_batches = max(1, min(int(num_mini_batches), int(self.num_envs)))
+        mini_batch_size = (self.num_envs + effective_num_mini_batches - 1) // effective_num_mini_batches
         for ep in range(num_epochs):
             first_traj = 0
-            for i in range(num_mini_batches):
+            for i in range(effective_num_mini_batches):
                 start = i * mini_batch_size
-                stop = (i + 1) * mini_batch_size
+                stop = min((i + 1) * mini_batch_size, self.num_envs)
+                if start >= stop:
+                    continue
 
                 dones = self.dones.squeeze(-1)
                 last_was_done = torch.zeros_like(dones, dtype=torch.bool)
@@ -193,6 +199,8 @@ class RolloutStorage:
                 last_was_done[0] = True
                 trajectories_batch_size = torch.sum(last_was_done[:, start:stop])
                 last_traj = first_traj + trajectories_batch_size
+                if last_traj <= first_traj:
+                    continue
 
                 masks_batch = trajectory_masks[:, first_traj:last_traj]
                 obs_batch = padded_obs_trajectories[:, first_traj:last_traj]
