@@ -71,16 +71,24 @@ def store_code_state(logdir, repositories) -> list:
             continue
         # get the name of the repository
         repo_name = pathlib.Path(repo.working_dir).name
-        t = repo.head.commit.tree
+        try:
+            t = repo.head.commit.tree
+        except Exception as exc:
+            print(f"Could not resolve git HEAD for '{repo_name}' ({repository_file_path}): {exc}. Skipping.")
+            continue
         diff_file_name = os.path.join(git_log_dir, f"{repo_name}.diff")
         # check if the diff file already exists
         if os.path.isfile(diff_file_name):
             continue
         # write the diff file
         print(f"Storing git diff for '{repo_name}' in: {diff_file_name}")
-        with open(diff_file_name, "x") as f:
-            content = f"--- git status ---\n{repo.git.status()} \n\n\n--- git diff ---\n{repo.git.diff(t)}"
-            f.write(content)
+        try:
+            with open(diff_file_name, "x") as f:
+                content = f"--- git status ---\n{repo.git.status()} \n\n\n--- git diff ---\n{repo.git.diff(t)}"
+                f.write(content)
+        except Exception as exc:
+            print(f"Could not store git diff for '{repo_name}': {exc}. Skipping.")
+            continue
         # add the file path to the list of files to be uploaded
         file_paths.append(diff_file_name)
     return file_paths
