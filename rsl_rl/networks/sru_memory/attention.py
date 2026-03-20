@@ -3,12 +3,41 @@
 
 """Cross-attention modules for fusing image features with proprioceptive info."""
 
+from contextlib import nullcontext
 import math
 from typing import List, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def _math_sdp_context(device: torch.device):
+    """Force the safe math SDPA backend on CUDA.
+
+    PyTorch may select fused CUDA SDPA kernels for MultiheadAttention. On large
+    recurrent batches this has been observed to fail with
+    "CUDA error: invalid configuration argument" during kernel launch. Falling
+    back to the math backend is slower but robust.
+    """
+    if device.type != "cuda":
+        return nullcontext()
+
+    try:
+        from torch.nn.attention import SDPBackend, sdpa_kernel
+
+        return sdpa_kernel([SDPBackend.MATH])
+    except Exception:
+        pass
+
+    if hasattr(torch.backends.cuda, "sdp_kernel"):
+        return torch.backends.cuda.sdp_kernel(
+            enable_flash=False,
+            enable_math=True,
+            enable_mem_efficient=False,
+        )
+
+    return nullcontext()
 
 
 def _compute_positional_encoding_3d(
@@ -174,7 +203,8 @@ class CrossAttentionFuseModule(nn.Module):
 
         # 5. self-attention (pre-norm + residual)
         x_norm = self.norm1(x)
-        sa, _ = self.self_attn(x_norm, x_norm, x_norm, key_padding_mask=key_mask, need_weights=False)
+        with _math_sdp_context(x.device):
+            sa, _ = self.self_attn(x_norm, x_norm, x_norm, key_padding_mask=key_mask, need_weights=False)
         x = x + sa
 
         # 6. feed-forward (pre-norm + residual)
@@ -182,6 +212,7 @@ class CrossAttentionFuseModule(nn.Module):
 
         # 7. cross-attention with info query
         q = self.info_proj(info).unsqueeze(1)  # (B,1,C)
-        ca, _ = self.cross_attn(q, x, x, key_padding_mask=key_mask, need_weights=False)
+        with _math_sdp_context(x.device):
+            ca, _ = self.cross_attn(q, x, x, key_padding_mask=key_mask, need_weights=False)
 
         return ca.squeeze(1)  # (B, C)
