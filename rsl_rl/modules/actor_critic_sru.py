@@ -205,8 +205,9 @@ class ActorCriticSRU(nn.Module):
 
     def reset(self, dones=None):
         """Reset the hidden states of both RNN memories."""
-        self.memory_a.reset(dones)
-        self.memory_c.reset(dones)
+        # Zero reset avoids leaking recurrent state across terminated trajectories.
+        self.memory_a.reset(dones, use_random_init=False)
+        self.memory_c.reset(dones, use_random_init=False)
 
     def forward(self):
         raise NotImplementedError("Forward method not implemented.")
