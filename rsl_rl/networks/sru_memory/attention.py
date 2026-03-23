@@ -4,11 +4,24 @@
 """Cross-attention modules for fusing image features with proprioceptive info."""
 
 import math
+from contextlib import nullcontext
 from typing import List, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+try:
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+except ImportError:  # pragma: no cover - older torch fallback
+    SDPBackend = None
+    sdpa_kernel = None
+
+
+def _sdpa_math_context():
+    if SDPBackend is None or sdpa_kernel is None:
+        return nullcontext()
+    return sdpa_kernel([SDPBackend.MATH])
 
 
 def _compute_positional_encoding_3d(
@@ -174,7 +187,8 @@ class CrossAttentionFuseModule(nn.Module):
 
         # 5. self-attention (pre-norm + residual)
         x_norm = self.norm1(x)
-        sa, _ = self.self_attn(x_norm, x_norm, x_norm, key_padding_mask=key_mask, need_weights=False)
+        with _sdpa_math_context():
+            sa, _ = self.self_attn(x_norm, x_norm, x_norm, key_padding_mask=key_mask, need_weights=False)
         x = x + sa
 
         # 6. feed-forward (pre-norm + residual)
@@ -182,6 +196,7 @@ class CrossAttentionFuseModule(nn.Module):
 
         # 7. cross-attention with info query
         q = self.info_proj(info).unsqueeze(1)  # (B,1,C)
-        ca, _ = self.cross_attn(q, x, x, key_padding_mask=key_mask, need_weights=False)
+        with _sdpa_math_context():
+            ca, _ = self.cross_attn(q, x, x, key_padding_mask=key_mask, need_weights=False)
 
         return ca.squeeze(1)  # (B, C)
