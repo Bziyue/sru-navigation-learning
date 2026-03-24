@@ -119,6 +119,12 @@ class OnPolicyRunner:
             self.env.episode_length_buf = torch.randint_like(
                 self.env.episode_length_buf, high=int(self.env.max_episode_length)
             )
+        start_iter = self.current_learning_iteration
+        tot_iter = start_iter + num_learning_iterations
+        if hasattr(self.env, "initialize_teammate_obs_curriculum"):
+            self.env.initialize_teammate_obs_curriculum(start_iter)
+        if hasattr(self.env, "set_training_iteration"):
+            self.env.set_training_iteration(start_iter)
         obs, critic_obs = self._split_observations(self.env.get_observations())
         obs, critic_obs = obs.to(self.device), critic_obs.to(self.device)
         self.train_mode()
@@ -132,11 +138,10 @@ class OnPolicyRunner:
         # Get reward shifting value for MDPO
         reward_shifting_value = self.cfg.get("reward_shifting_value", 0.0)
 
-        start_iter = self.current_learning_iteration
-        tot_iter = start_iter + num_learning_iterations
-
         for it in range(start_iter, tot_iter):
             start = time.time()
+            if hasattr(self.env, "set_training_iteration"):
+                self.env.set_training_iteration(it)
 
             # Check if we should start recording video this iteration
             if self.video_recorder:
@@ -366,6 +371,10 @@ class OnPolicyRunner:
                 "iter": self.current_learning_iteration,
                 "infos": infos,
             }
+        if hasattr(self.env, "get_checkpoint_state"):
+            env_checkpoint_state = self.env.get_checkpoint_state()
+            if env_checkpoint_state is not None:
+                saved_dict["env_checkpoint_state"] = env_checkpoint_state
         if self.empirical_normalization:
             saved_dict["obs_norm_state_dict"] = self.obs_normalizer.state_dict()
             saved_dict["critic_obs_norm_state_dict"] = self.critic_obs_normalizer.state_dict()
@@ -390,6 +399,8 @@ class OnPolicyRunner:
             self.obs_normalizer.load_state_dict(loaded_dict["obs_norm_state_dict"])
             self.critic_obs_normalizer.load_state_dict(loaded_dict["critic_obs_norm_state_dict"])
         self.current_learning_iteration = loaded_dict["iter"]
+        if "env_checkpoint_state" in loaded_dict and hasattr(self.env, "load_checkpoint_state"):
+            self.env.load_checkpoint_state(loaded_dict["env_checkpoint_state"])
         return loaded_dict["infos"]
 
     def get_inference_policy(self, device=None):
